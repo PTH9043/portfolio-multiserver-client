@@ -9,16 +9,26 @@ public partial class Form1 : Form
 {
     private const string TraceSource = "Form1.cs";
 
+    private sealed record RoomComboItem(uint RoomId, string Name, uint UserCount, uint MaxUsers)
+    {
+        public override string ToString() => $"#{RoomId} {Name} ({UserCount:N0}/{MaxUsers:N0})";
+    }
+
     private readonly ulong _traceId = ClientRuntimeTrace.NextObjectId();
     private readonly ChatClientConnection _connection = new();
+    private readonly System.Windows.Forms.Timer _pingTimer = new();
+    private readonly Dictionary<uint, string> _roomNames = new();
     private readonly Font _chatRegularFont;
     private readonly Font _chatBoldFont;
     private bool _loggedIn;
     private bool _busyConnecting;
     private bool _loginRejected;
+    private bool _joiningRoom;
     private string _myNickname = string.Empty;
+    private uint _currentRoomId = ChatProtocolLimits.DefaultRoomId;
     private uint _currentOffset;
     private uint _lastReportedTotal;
+    private ulong? _lastRttMs;
 
     public Form1()
     {
@@ -31,12 +41,23 @@ public partial class Form1 : Form
         _connection.ChatReceived += packet => MarshalToUi(() => OnChatReceived(packet));
         _connection.RoomUserCountReceived += packet => MarshalToUi(() => OnRoomUserCount(packet));
         _connection.RoomUsersReceived += packet => MarshalToUi(() => OnRoomUsers(packet));
+        _connection.RoomListReceived += packet => MarshalToUi(() => OnRoomList(packet));
+        _connection.JoinRoomResultReceived += packet => MarshalToUi(() => OnJoinRoomResult(packet));
+        _connection.PongReceived += packet => MarshalToUi(() => OnPongReceived(packet));
         _connection.Disconnected += reason => MarshalToUi(() => OnDisconnected(reason));
         _connection.ErrorOccurred += message => MarshalToUi(() => AppendSystemLine($"[오류] {message}", Color.Firebrick));
 
+        _pingTimer.Interval = ChatProtocolLimits.HeartbeatIntervalMs;
+        _pingTimer.Tick += async (_, _) => await SendHeartbeatPingAsync();
+
         _connectButton.Click += async (_, _) => await OnConnectButtonClickAsync();
         _sendButton.Click += async (_, _) => await SendCurrentChatAsync();
-        _refreshUsersButton.Click += async (_, _) => await RequestUsersPageAsync(_currentOffset);
+        _joinRoomButton.Click += async (_, _) => await JoinSelectedRoomAsync();
+        _refreshUsersButton.Click += async (_, _) =>
+        {
+            await RequestRoomListAsync();
+            await RequestUsersPageAsync(_currentOffset);
+        };
         _prevPageButton.Click += async (_, _) =>
         {
             uint prevOffset = _currentOffset >= ChatProtocolLimits.RoomUsersPageSize
@@ -73,10 +94,15 @@ public partial class Form1 : Form
             _nicknameTextBox.Focus();
             AppendSystemLine("상단 닉네임 칸(2~12자 한글·영문·숫자)을 입력하고 [접속 / 로그인]을 누르면 아래 채팅 입력창이 활성화됩니다.", Color.SlateGray);
         };
-        FormClosing += (_, _) => _connection.Dispose();
+        FormClosing += (_, _) =>
+        {
+            _pingTimer.Stop();
+            _connection.Dispose();
+        };
         FormClosed += (_, _) =>
         {
             ClientRuntimeTrace.RecordEvent(TraceEventKind.Destroy, nameof(Form1), "FormClosed", _traceId, TraceSource);
+            _pingTimer.Dispose();
             _chatRegularFont.Dispose();
             _chatBoldFont.Dispose();
         };
@@ -147,16 +173,22 @@ public partial class Form1 : Form
             {
                 _loggedIn = true;
                 _loginRejected = false;
+                _joiningRoom = false;
+                _currentRoomId = packet.RoomId != 0 ? packet.RoomId : ChatProtocolLimits.DefaultRoomId;
                 _currentOffset = 0;
                 _lastReportedTotal = packet.UserCount;
-                _statusLabel.Text = $"상태: 접속됨 · {_myNickname}";
-                _statusLabel.ForeColor = Color.FromArgb(15, 118, 110);
+                _lastRttMs = null;
+                UpdateConnectedStatusLabel();
+                UpdateChatHeader();
                 UpdateUserCountDisplay(packet.UserCount);
-                AppendSystemLine($"로그인 성공! 기본 방(#1)에 입장했습니다. (현재 {packet.UserCount:N0}명)", Color.Teal);
-                ClientRuntimeTrace.Log("INFO", $"Login success: nickname={_myNickname}, userCount={packet.UserCount}", _traceId);
+                AppendSystemLine($"로그인 성공! {FormatRoomTitle(_currentRoomId)}에 입장했습니다. (현재 {packet.UserCount:N0}명)", Color.Teal);
+                ClientRuntimeTrace.Log("INFO", $"Login success: nickname={_myNickname}, roomId={_currentRoomId}, userCount={packet.UserCount}", _traceId);
+                _pingTimer.Start();
                 UpdateUiState();
                 _chatInputBox.Focus();
+                await RequestRoomListAsync();
                 await RequestUsersPageAsync(0);
+                await SendHeartbeatPingAsync();
                 return;
             }
 
@@ -234,15 +266,101 @@ public partial class Form1 : Form
         UpdatePagingButtons();
     }
 
+    private void OnRoomList(SCRoomList packet)
+    {
+        uint selectedRoomId = (_roomComboBox.SelectedItem as RoomComboItem)?.RoomId ?? _currentRoomId;
+
+        _roomComboBox.BeginUpdate();
+        try
+        {
+            _roomComboBox.Items.Clear();
+            _roomNames.Clear();
+            int selectedIndex = -1;
+            int currentRoomIndex = -1;
+
+            for (int i = 0; i < packet.Rooms.Count; i++)
+            {
+                FRoomSummary room = packet.Rooms[i];
+                _roomNames[room.RoomId] = room.Name;
+                var item = new RoomComboItem(room.RoomId, room.Name, room.UserCount, room.MaxUsers);
+                _roomComboBox.Items.Add(item);
+                if (room.RoomId == selectedRoomId)
+                    selectedIndex = i;
+                if (room.RoomId == _currentRoomId)
+                    currentRoomIndex = i;
+            }
+
+            if (selectedIndex >= 0)
+                _roomComboBox.SelectedIndex = selectedIndex;
+            else if (currentRoomIndex >= 0)
+                _roomComboBox.SelectedIndex = currentRoomIndex;
+            else if (_roomComboBox.Items.Count > 0)
+                _roomComboBox.SelectedIndex = 0;
+        }
+        finally
+        {
+            _roomComboBox.EndUpdate();
+        }
+
+        UpdateChatHeader();
+        UpdateUiState();
+    }
+
+    private async void OnJoinRoomResult(SCJoinRoomResult packet)
+    {
+        using var _ = ClientRuntimeTrace.EnterScope(nameof(Form1), nameof(OnJoinRoomResult), _traceId, TraceSource, TraceEventKind.Callback);
+        _joiningRoom = false;
+        try
+        {
+            if (packet.Result == EJoinRoomResult.JoinRoomSuccess)
+            {
+                _currentRoomId = packet.RoomId;
+                _currentOffset = 0;
+                _lastReportedTotal = packet.UserCount;
+                UpdateChatHeader();
+                UpdateUserCountDisplay(packet.UserCount);
+                AppendSystemLine($"{FormatRoomTitle(_currentRoomId)}로 이동했습니다. (현재 {packet.UserCount:N0}명)", Color.Teal);
+                UpdateUiState();
+                await RequestRoomListAsync();
+                await RequestUsersPageAsync(0);
+                return;
+            }
+
+            string reason = ChatProtocolLimits.DescribeJoinRoomResult(packet.Result);
+            AppendSystemLine($"방 이동 실패: {reason}", Color.DarkOrange);
+            UpdateUiState();
+        }
+        catch (Exception ex)
+        {
+            AppendSystemLine($"방 이동 후처리 오류: {ex.Message}", Color.Firebrick);
+            UpdateUiState();
+        }
+    }
+
+    private void OnPongReceived(SCPong packet)
+    {
+        ulong now = (ulong)Environment.TickCount64;
+        _lastRttMs = now >= packet.ClientTimeMs ? now - packet.ClientTimeMs : 0;
+        if (_loggedIn)
+            UpdateConnectedStatusLabel();
+    }
+
     private void OnDisconnected(string reason)
     {
         bool wasRejected = _loginRejected;
+        _pingTimer.Stop();
         _loginRejected = false;
         _loggedIn = false;
         _busyConnecting = false;
+        _joiningRoom = false;
+        _currentRoomId = ChatProtocolLimits.DefaultRoomId;
         _currentOffset = 0;
         _lastReportedTotal = 0;
+        _lastRttMs = null;
+        _roomNames.Clear();
+        _roomComboBox.Items.Clear();
         _usersListBox.Items.Clear();
+        UpdateChatHeader();
         UpdateUserCountDisplay(0);
         if (!wasRejected)
         {
@@ -295,6 +413,83 @@ public partial class Form1 : Form
         }
     }
 
+    private async Task RequestRoomListAsync()
+    {
+        if (!_loggedIn || !_connection.IsConnected)
+            return;
+
+        try
+        {
+            await _connection.RequestRoomListAsync();
+        }
+        catch (Exception ex)
+        {
+            AppendSystemLine($"방 목록 요청 실패: {ex.Message}", Color.Firebrick);
+        }
+    }
+
+    private async Task JoinSelectedRoomAsync()
+    {
+        if (!_loggedIn || !_connection.IsConnected || _joiningRoom)
+            return;
+
+        if (_roomComboBox.SelectedItem is not RoomComboItem selected)
+            return;
+
+        if (selected.RoomId == _currentRoomId)
+        {
+            AppendSystemLine($"이미 {FormatRoomTitle(_currentRoomId)}에 참여 중입니다.", Color.SlateGray);
+            return;
+        }
+
+        _joiningRoom = true;
+        UpdateUiState();
+        try
+        {
+            await _connection.JoinRoomAsync(selected.RoomId);
+        }
+        catch (Exception ex)
+        {
+            _joiningRoom = false;
+            AppendSystemLine($"방 이동 요청 실패: {ex.Message}", Color.Firebrick);
+            UpdateUiState();
+        }
+    }
+
+    private async Task SendHeartbeatPingAsync()
+    {
+        if (!_loggedIn || !_connection.IsConnected)
+            return;
+
+        try
+        {
+            await _connection.SendPingAsync((ulong)Environment.TickCount64);
+        }
+        catch
+        {
+            // 연결 종료 중 발생한 Ping 실패는 수신 루프의 Disconnected 경로가 처리합니다.
+        }
+    }
+
+    private string FormatRoomTitle(uint roomId)
+    {
+        return _roomNames.TryGetValue(roomId, out string? name) && !string.IsNullOrEmpty(name)
+            ? $"방 #{roomId} {name}"
+            : $"방 #{roomId}";
+    }
+
+    private void UpdateChatHeader()
+    {
+        _chatGroupBox.Text = $"실시간 채팅 ({FormatRoomTitle(_currentRoomId)})";
+    }
+
+    private void UpdateConnectedStatusLabel()
+    {
+        string rttText = _lastRttMs.HasValue ? $" · RTT {_lastRttMs.Value}ms" : string.Empty;
+        _statusLabel.Text = $"상태: 접속됨 · {_myNickname}{rttText}";
+        _statusLabel.ForeColor = Color.FromArgb(15, 118, 110);
+    }
+
     private void UpdateUserCountDisplay(uint count)
     {
         _userCountLabel.Text = $"현재 인원: {count:N0} / {ChatProtocolLimits.DefaultRoomMaxUsers:N0}명";
@@ -344,6 +539,8 @@ public partial class Form1 : Form
             ? "메시지를 입력하세요 (최대 200자, Enter로 전송)"
             : "로그인 후 입력 가능 — 먼저 상단 닉네임 입력 후 [접속 / 로그인] 클릭";
         _sendButton.Enabled = _loggedIn;
+        _roomComboBox.Enabled = _loggedIn && !_joiningRoom && _roomComboBox.Items.Count > 0;
+        _joinRoomButton.Enabled = _loggedIn && !_joiningRoom && _roomComboBox.Items.Count > 0;
         _refreshUsersButton.Enabled = _loggedIn;
         UpdatePagingButtons();
         UpdateChatLengthCounter();

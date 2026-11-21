@@ -25,6 +25,9 @@ partial class Form1
     private Button _sendButton = null!;
 
     private GroupBox _usersGroupBox = null!;
+    private TableLayoutPanel _roomSelectPanel = null!;
+    private ComboBox _roomComboBox = null!;
+    private Button _joinRoomButton = null!;
     private TableLayoutPanel _usersTopPanel = null!;
     private Label _userCountLabel = null!;
     private Button _refreshUsersButton = null!;
@@ -68,6 +71,9 @@ partial class Form1
         _sendButton = new Button();
 
         _usersGroupBox = new GroupBox();
+        _roomSelectPanel = new TableLayoutPanel();
+        _roomComboBox = new ComboBox();
+        _joinRoomButton = new Button();
         _usersTopPanel = new TableLayoutPanel();
         _userCountLabel = new Label();
         _refreshUsersButton = new Button();
@@ -86,6 +92,7 @@ partial class Form1
         _chatGroupBox.SuspendLayout();
         _chatInputPanel.SuspendLayout();
         _usersGroupBox.SuspendLayout();
+        _roomSelectPanel.SuspendLayout();
         _usersTopPanel.SuspendLayout();
         _pagingPanel.SuspendLayout();
         SuspendLayout();
@@ -204,10 +211,33 @@ partial class Form1
         _mainSplit.Panel1.Padding = new Padding(8);
         _mainSplit.Panel1.Controls.Add(_chatGroupBox);
 
-        // Right: Room users paging panel
+        // Right: Room switch & users paging panel
         _usersGroupBox.Dock = DockStyle.Fill;
         _usersGroupBox.Padding = new Padding(8);
-        _usersGroupBox.Text = "방 접속자 (20명 페이징)";
+        _usersGroupBox.Text = "채널 · 방 접속자 (20명 페이징)";
+
+        _roomSelectPanel.Dock = DockStyle.Top;
+        _roomSelectPanel.Height = 36;
+        _roomSelectPanel.Padding = new Padding(0, 0, 0, 4);
+        _roomSelectPanel.ColumnCount = 2;
+        _roomSelectPanel.RowCount = 1;
+        _roomSelectPanel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100F));
+        _roomSelectPanel.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        _roomSelectPanel.RowStyles.Add(new RowStyle(SizeType.Percent, 100F));
+
+        _roomComboBox.Dock = DockStyle.Fill;
+        _roomComboBox.DropDownStyle = ComboBoxStyle.DropDownList;
+        _roomComboBox.Margin = new Padding(0, 2, 6, 0);
+        _roomComboBox.Enabled = false;
+
+        _joinRoomButton.Anchor = AnchorStyles.Right;
+        _joinRoomButton.Margin = new Padding(0);
+        _joinRoomButton.Text = "방 이동";
+        _joinRoomButton.Size = new Size(78, 28);
+        _joinRoomButton.Enabled = false;
+
+        _roomSelectPanel.Controls.Add(_roomComboBox, 0, 0);
+        _roomSelectPanel.Controls.Add(_joinRoomButton, 1, 0);
 
         _usersTopPanel.Dock = DockStyle.Top;
         _usersTopPanel.Height = 36;
@@ -268,6 +298,7 @@ partial class Form1
 
         _usersGroupBox.Controls.Add(_usersListBox);
         _usersGroupBox.Controls.Add(_usersTopPanel);
+        _usersGroupBox.Controls.Add(_roomSelectPanel);
         _usersGroupBox.Controls.Add(_pagingPanel);
         _mainSplit.Panel2.Padding = new Padding(0, 8, 8, 8);
         _mainSplit.Panel2.Controls.Add(_usersGroupBox);
@@ -286,6 +317,8 @@ partial class Form1
         _chatInputPanel.ResumeLayout(false);
         _chatInputPanel.PerformLayout();
         _usersGroupBox.ResumeLayout(false);
+        _roomSelectPanel.ResumeLayout(false);
+        _roomSelectPanel.PerformLayout();
         _usersTopPanel.ResumeLayout(false);
         _usersTopPanel.PerformLayout();
         _pagingPanel.ResumeLayout(false);

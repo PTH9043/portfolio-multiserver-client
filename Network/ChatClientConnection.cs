@@ -44,6 +44,9 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
     public event Action<SCChat>? ChatReceived;
     public event Action<SCRoomUserCount>? RoomUserCountReceived;
     public event Action<SCRoomUsers>? RoomUsersReceived;
+    public event Action<SCRoomList>? RoomListReceived;
+    public event Action<SCJoinRoomResult>? JoinRoomResultReceived;
+    public event Action<SCPong>? PongReceived;
     public event Action<string>? Disconnected;
     public event Action<string>? ErrorOccurred;
 
@@ -94,6 +97,21 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
     public Task RequestRoomUsersAsync(uint offset, CancellationToken cancellationToken = default)
     {
         return SendAsync(ECSPacket.CsRoomUsers, new CSRoomUsers { Offset = offset }, cancellationToken);
+    }
+
+    public Task RequestRoomListAsync(CancellationToken cancellationToken = default)
+    {
+        return SendAsync(ECSPacket.CsRoomList, new CSRoomList(), cancellationToken);
+    }
+
+    public Task JoinRoomAsync(uint roomId, CancellationToken cancellationToken = default)
+    {
+        return SendAsync(ECSPacket.CsJoinRoom, new CSJoinRoom { RoomId = roomId }, cancellationToken);
+    }
+
+    public Task SendPingAsync(ulong clientTimeMs, CancellationToken cancellationToken = default)
+    {
+        return SendAsync(ECSPacket.CsPing, new CSPing { ClientTimeMs = clientTimeMs }, cancellationToken);
     }
 
     public async Task SendAsync(ECSPacket packetType, IMessage message, CancellationToken cancellationToken = default)
@@ -255,6 +273,18 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
 
                 case ESCPacket.ScRoomUsers:
                     RoomUsersReceived?.Invoke(SCRoomUsers.Parser.ParseFrom(body));
+                    break;
+
+                case ESCPacket.ScRoomList:
+                    RoomListReceived?.Invoke(SCRoomList.Parser.ParseFrom(body));
+                    break;
+
+                case ESCPacket.ScJoinRoomResult:
+                    JoinRoomResultReceived?.Invoke(SCJoinRoomResult.Parser.ParseFrom(body));
+                    break;
+
+                case ESCPacket.ScPong:
+                    PongReceived?.Invoke(SCPong.Parser.ParseFrom(body));
                     break;
 
                 default:

@@ -13,7 +13,9 @@ public static class ChatProtocolLimits
     public const int PacketBufferSize = 1024;
     public const int PacketMaxBodySize = PacketBufferSize - PacketHeaderSize;
 
+    public const uint DefaultRoomId = 1;
     public const int DefaultRoomMaxUsers = 1000;
+    public const int HeartbeatIntervalMs = 10000;
     public const int NicknameMinChars = 2;
     public const int NicknameMaxChars = 12;
     public const int ChatMinChars = 1;
@@ -80,5 +82,15 @@ public static class ChatProtocolLimits
         ELoginResult.LoginResultAlreadyLoggedIn => "이미 로그인된 연결입니다.",
         ELoginResult.LoginResultRoomFull => "기본 방 정원(1,000명)이 가득 찼습니다.",
         _ => $"알 수 없는 로그인 응답 ({result})"
+    };
+
+    public static string DescribeJoinRoomResult(EJoinRoomResult result) => result switch
+    {
+        EJoinRoomResult.JoinRoomSuccess => "방 이동 성공",
+        EJoinRoomResult.JoinRoomNotFound => "존재하지 않는 방입니다.",
+        EJoinRoomResult.JoinRoomFull => "대상 방의 정원이 가득 찼습니다.",
+        EJoinRoomResult.JoinRoomAlreadyInRoom => "이미 해당 방에 참여 중입니다.",
+        EJoinRoomResult.JoinRoomTransferInProgress => "이전 방 이동 처리가 아직 진행 중입니다.",
+        _ => $"알 수 없는 방 이동 응답 ({result})"
     };
 }
