@@ -51,6 +51,7 @@ public partial class Form1 : Form
         _pingTimer.Tick += async (_, _) => await SendHeartbeatPingAsync();
 
         _connectButton.Click += async (_, _) => await OnConnectButtonClickAsync();
+        _registerButton.Click += async (_, _) => await OnRegisterButtonClickAsync();
         _sendButton.Click += async (_, _) => await SendCurrentChatAsync();
         _joinRoomButton.Click += async (_, _) => await JoinSelectedRoomAsync();
         _refreshUsersButton.Click += async (_, _) =>
@@ -88,11 +89,19 @@ public partial class Form1 : Form
                 BeginInvoke(async () => await OnConnectButtonClickAsync());
             }
         };
+        _passwordTextBox.KeyDown += (_, e) =>
+        {
+            if (e.KeyCode == Keys.Enter && !_connection.IsConnected && !_busyConnecting)
+            {
+                e.SuppressKeyPress = true;
+                BeginInvoke(async () => await OnConnectButtonClickAsync());
+            }
+        };
 
         Shown += (_, _) =>
         {
             _nicknameTextBox.Focus();
-            AppendSystemLine("상단 닉네임 칸(2~12자 한글·영문·숫자)을 입력하고 [접속 / 로그인]을 누르면 아래 채팅 입력창이 활성화됩니다.", Color.SlateGray);
+            AppendSystemLine("MySQL 모드: [회원가입] 후 아이디·비밀번호를 입력하고 [로그인]을 누르세요. (--db=off 모드에서는 아이디 칸에 닉네임만 입력)", Color.SlateGray);
         };
         FormClosing += (_, _) =>
         {
@@ -122,7 +131,9 @@ public partial class Form1 : Form
 
         string host = _hostTextBox.Text.Trim();
         int port = (int)_portInput.Value;
-        string nickname = _nicknameTextBox.Text.Trim();
+        string idOrNick = _nicknameTextBox.Text.Trim();
+        string password = _passwordTextBox.Text;
+        bool useDbAuth = !string.IsNullOrEmpty(password);
 
         if (string.IsNullOrEmpty(host))
         {
@@ -130,25 +141,48 @@ public partial class Form1 : Form
             return;
         }
 
-        if (!ChatProtocolLimits.IsValidNickname(nickname))
+        if (useDbAuth)
         {
-            AppendSystemLine("닉네임은 2~12자의 완성형 한글·영문·숫자만 사용할 수 있습니다.", Color.DarkOrange);
+            if (!ChatProtocolLimits.IsValidUsername(idOrNick))
+            {
+                AppendSystemLine("아이디는 4~20자의 영문·숫자·밑줄(_)만 사용할 수 있습니다.", Color.DarkOrange);
+                _nicknameTextBox.Focus();
+                return;
+            }
+            if (!ChatProtocolLimits.IsValidPassword(password))
+            {
+                AppendSystemLine("비밀번호는 공백 없는 6~64자여야 합니다.", Color.DarkOrange);
+                _passwordTextBox.Focus();
+                return;
+            }
+        }
+        else if (!ChatProtocolLimits.IsValidNickname(idOrNick))
+        {
+            AppendSystemLine("닉네임(2~12자 한글·영문·숫자) 또는 아이디+비밀번호를 입력해 주세요.", Color.DarkOrange);
             _nicknameTextBox.Focus();
             return;
         }
 
         _busyConnecting = true;
         _loginRejected = false;
-        _myNickname = nickname;
+        _myNickname = idOrNick;
         _statusLabel.Text = $"상태: {host}:{port} 접속 중...";
         _statusLabel.ForeColor = Color.FromArgb(14, 116, 144);
         UpdateUiState();
 
         try
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            await _connection.ConnectAndLoginAsync(host, port, nickname, cts.Token);
-            AppendSystemLine($"{host}:{port}에 연결했습니다. '{nickname}' 로그인 응답을 기다리는 중...", Color.SteelBlue);
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            if (useDbAuth)
+            {
+                await _connection.ConnectAndLoginAsync(host, port, username: idOrNick, password: password, cancellationToken: cts.Token);
+                AppendSystemLine($"{host}:{port}에 연결했습니다. 계정 '{idOrNick}' MySQL 인증 응답 대기 중...", Color.SteelBlue);
+            }
+            else
+            {
+                await _connection.ConnectAndLoginAsync(host, port, idOrNick, cts.Token);
+                AppendSystemLine($"{host}:{port}에 연결했습니다. '{idOrNick}' 로그인 응답을 기다리는 중...", Color.SteelBlue);
+            }
         }
         catch (Exception ex)
         {
@@ -156,6 +190,93 @@ public partial class Form1 : Form
             _statusLabel.Text = "상태: 접속 실패";
             _statusLabel.ForeColor = Color.Firebrick;
             AppendSystemLine($"서버 접속 실패: {ex.Message}", Color.Firebrick);
+        }
+        finally
+        {
+            _busyConnecting = false;
+            UpdateUiState();
+        }
+    }
+
+    private async Task OnRegisterButtonClickAsync()
+    {
+        if (_busyConnecting || _connection.IsConnected || _loggedIn)
+            return;
+
+        string host = _hostTextBox.Text.Trim();
+        int port = (int)_portInput.Value;
+        if (string.IsNullOrEmpty(host))
+        {
+            AppendSystemLine("먼저 서버 주소를 입력해 주세요.", Color.DarkOrange);
+            return;
+        }
+
+        using var dlg = new Form
+        {
+            Text = "MultiServer 회원가입 (MySQL)",
+            FormBorderStyle = FormBorderStyle.FixedDialog,
+            StartPosition = FormStartPosition.CenterParent,
+            MaximizeBox = false,
+            MinimizeBox = false,
+            ClientSize = new Size(340, 198),
+            Font = Font
+        };
+
+        var userLbl = new Label { Text = "아이디 (4~20 영문/숫자/_)", Location = new Point(16, 14), AutoSize = true };
+        var userBox = new TextBox { Location = new Point(16, 34), Size = new Size(304, 26), MaxLength = 20, Text = _nicknameTextBox.Text.Trim() };
+        var passLbl = new Label { Text = "비밀번호 (6~64 공백 불가)", Location = new Point(16, 66), AutoSize = true };
+        var passBox = new TextBox { Location = new Point(16, 86), Size = new Size(304, 26), MaxLength = 64, UseSystemPasswordChar = true };
+        var nickLbl = new Label { Text = "닉네임 (2~12 한글/영문/숫자)", Location = new Point(16, 118), AutoSize = true };
+        var nickBox = new TextBox { Location = new Point(16, 138), Size = new Size(194, 26), MaxLength = 12 };
+        var okBtn = new Button { Text = "가입하기", DialogResult = DialogResult.OK, Location = new Point(220, 136), Size = new Size(100, 30) };
+
+        dlg.Controls.AddRange([userLbl, userBox, passLbl, passBox, nickLbl, nickBox, okBtn]);
+        dlg.AcceptButton = okBtn;
+
+        if (dlg.ShowDialog(this) != DialogResult.OK)
+            return;
+
+        string username = userBox.Text.Trim();
+        string password = passBox.Text;
+        string nickname = nickBox.Text.Trim();
+
+        if (!ChatProtocolLimits.IsValidUsername(username))
+        {
+            AppendSystemLine(ChatProtocolLimits.DescribeRegisterResult(ERegisterResult.RegisterResultInvalidUsername), Color.DarkOrange);
+            return;
+        }
+        if (!ChatProtocolLimits.IsValidPassword(password))
+        {
+            AppendSystemLine(ChatProtocolLimits.DescribeRegisterResult(ERegisterResult.RegisterResultInvalidPassword), Color.DarkOrange);
+            return;
+        }
+        if (!ChatProtocolLimits.IsValidNickname(nickname))
+        {
+            AppendSystemLine(ChatProtocolLimits.DescribeRegisterResult(ERegisterResult.RegisterResultInvalidNickname), Color.DarkOrange);
+            return;
+        }
+
+        _busyConnecting = true;
+        UpdateUiState();
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(8));
+            SCRegisterResult res = await ChatClientConnection.RegisterAccountAsync(host, port, username, password, nickname, cts.Token);
+            string msg = ChatProtocolLimits.DescribeRegisterResult(res.Result);
+            if (res.Result == ERegisterResult.RegisterResultSuccess)
+            {
+                _nicknameTextBox.Text = username;
+                _passwordTextBox.Text = password;
+                AppendSystemLine($"[회원가입 성공] 아이디 '{username}' / 닉네임 '{nickname}' 등록 완료! 이제 [로그인]을 누르세요.", Color.Teal);
+            }
+            else
+            {
+                AppendSystemLine($"[회원가입 실패] {msg}", Color.Firebrick);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendSystemLine($"[회원가입 오류] {ex.Message}", Color.Firebrick);
         }
         finally
         {
@@ -174,6 +295,8 @@ public partial class Form1 : Form
                 _loggedIn = true;
                 _loginRejected = false;
                 _joiningRoom = false;
+                if (!string.IsNullOrEmpty(packet.Nickname))
+                    _myNickname = packet.Nickname;
                 _currentRoomId = packet.RoomId != 0 ? packet.RoomId : ChatProtocolLimits.DefaultRoomId;
                 _currentOffset = 0;
                 _lastReportedTotal = packet.UserCount;
@@ -531,8 +654,10 @@ public partial class Form1 : Form
         _hostTextBox.Enabled = !connected && !_busyConnecting;
         _portInput.Enabled = !connected && !_busyConnecting;
         _nicknameTextBox.Enabled = !connected && !_busyConnecting;
+        _passwordTextBox.Enabled = !connected && !_busyConnecting;
         _connectButton.Enabled = !_busyConnecting;
-        _connectButton.Text = connected ? "연결 해제" : "접속 / 로그인";
+        _connectButton.Text = connected ? "연결 해제" : "로그인";
+        _registerButton.Enabled = !connected && !_busyConnecting;
 
         _chatInputBox.Enabled = _loggedIn;
         _chatInputBox.PlaceholderText = _loggedIn

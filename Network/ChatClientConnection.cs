@@ -41,6 +41,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
     }
 
     public event Action<SCLoginResult>? LoginResultReceived;
+    public event Action<SCRegisterResult>? RegisterResultReceived;
     public event Action<SCChat>? ChatReceived;
     public event Action<SCRoomUserCount>? RoomUserCountReceived;
     public event Action<SCRoomUsers>? RoomUsersReceived;
@@ -50,7 +51,12 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
     public event Action<string>? Disconnected;
     public event Action<string>? ErrorOccurred;
 
-    public async Task ConnectAndLoginAsync(string host, int port, string nickname, CancellationToken cancellationToken = default)
+    public Task ConnectAndLoginAsync(string host, int port, string nickname, CancellationToken cancellationToken = default)
+    {
+        return ConnectAndLoginAsync(host, port, username: string.Empty, password: string.Empty, nickname: nickname, cancellationToken: cancellationToken);
+    }
+
+    public async Task ConnectAndLoginAsync(string host, int port, string username, string password, string nickname = "", CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
         using var _ = ClientRuntimeTrace.EnterScope(nameof(ChatClientConnection), nameof(ConnectAndLoginAsync), _traceId, TraceSource);
@@ -61,7 +67,8 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
         try
         {
             await client.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
-            ClientRuntimeTrace.Log("INFO", $"Connected to {host}:{port} (nickname={nickname})", _traceId);
+            string tag = string.IsNullOrEmpty(username) ? $"nickname={nickname}" : $"username={username}";
+            ClientRuntimeTrace.Log("INFO", $"Connected to {host}:{port} ({tag})", _traceId);
             NetworkStream stream = client.GetStream();
             var cts = new CancellationTokenSource();
 
@@ -77,8 +84,12 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
             ClientRuntimeTrace.RecordEvent(TraceEventKind.Post, nameof(ChatClientConnection), nameof(ReceiveLoopAsync), _traceId, TraceSource);
             _receiveTask = Task.Run(() => ReceiveLoopAsync(stream, cts.Token), CancellationToken.None);
 
-            await SendAsync(ECSPacket.CsLogin, new CSLogin { Nickname = nickname }, cancellationToken)
-                .ConfigureAwait(false);
+            await SendAsync(ECSPacket.CsLogin, new CSLogin
+            {
+                Nickname = nickname,
+                Username = username,
+                Password = password
+            }, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex)
         {
@@ -86,6 +97,44 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
             client.Dispose();
             await DisconnectAsync(notifyDisconnect: false).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// 일회성 TCP 연결로 CS_REGISTER를 전송하고 SC_REGISTER_RESULT를 수신한 뒤 연결을 정리합니다.
+    /// </summary>
+    public static async Task<SCRegisterResult> RegisterAccountAsync(
+        string host, int port, string username, string password, string nickname, CancellationToken cancellationToken = default)
+    {
+        using var client = new TcpClient { NoDelay = true };
+        await client.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
+        using NetworkStream stream = client.GetStream();
+
+        byte[] frame = PacketFramer.EncodeFrame(ECSPacket.CsRegister, new CSRegister
+        {
+            Username = username,
+            Password = password,
+            Nickname = nickname
+        });
+        await stream.WriteAsync(frame, cancellationToken).ConfigureAwait(false);
+
+        var decoder = new PacketStreamDecoder();
+        byte[] recvBuf = new byte[ChatProtocolLimits.PacketBufferSize * 2];
+        while (true)
+        {
+            int n = await stream.ReadAsync(recvBuf, cancellationToken).ConfigureAwait(false);
+            if (n == 0)
+                throw new IOException("회원가입 응답을 받기 전에 서버 연결이 종료되었습니다.");
+
+            decoder.Append(recvBuf.AsSpan(0, n));
+            string? frameError;
+            while (decoder.TryPopPacket(out ushort rawType, out byte[] body, out frameError))
+            {
+                if ((ESCPacket)rawType == ESCPacket.ScRegisterResult)
+                    return SCRegisterResult.Parser.ParseFrom(body);
+            }
+            if (frameError is not null)
+                throw new InvalidDataException(frameError);
         }
     }
 
@@ -261,6 +310,10 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
             {
                 case ESCPacket.ScLoginResult:
                     LoginResultReceived?.Invoke(SCLoginResult.Parser.ParseFrom(body));
+                    break;
+
+                case ESCPacket.ScRegisterResult:
+                    RegisterResultReceived?.Invoke(SCRegisterResult.Parser.ParseFrom(body));
                     break;
 
                 case ESCPacket.ScChat:

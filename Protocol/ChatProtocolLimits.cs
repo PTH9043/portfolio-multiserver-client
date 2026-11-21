@@ -16,6 +16,10 @@ public static class ChatProtocolLimits
     public const uint DefaultRoomId = 1;
     public const int DefaultRoomMaxUsers = 1000;
     public const int HeartbeatIntervalMs = 10000;
+    public const int UsernameMinChars = 4;
+    public const int UsernameMaxChars = 20;
+    public const int PasswordMinChars = 6;
+    public const int PasswordMaxChars = 64;
     public const int NicknameMinChars = 2;
     public const int NicknameMaxChars = 12;
     public const int ChatMinChars = 1;
@@ -74,6 +78,33 @@ public static class ChatProtocolLimits
         return count;
     }
 
+    public static bool IsValidUsername(string? username)
+    {
+        if (string.IsNullOrEmpty(username) || username.Length < UsernameMinChars || username.Length > UsernameMaxChars)
+            return false;
+
+        foreach (char ch in username)
+        {
+            bool ok = (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_';
+            if (!ok)
+                return false;
+        }
+        return true;
+    }
+
+    public static bool IsValidPassword(string? password)
+    {
+        if (string.IsNullOrEmpty(password) || password.Length < PasswordMinChars || password.Length > PasswordMaxChars)
+            return false;
+
+        foreach (char ch in password)
+        {
+            if (ch < 0x21 || ch > 0x7E)
+                return false;
+        }
+        return true;
+    }
+
     public static string DescribeLoginResult(ELoginResult result) => result switch
     {
         ELoginResult.LoginResultSuccess => "로그인 성공",
@@ -81,7 +112,22 @@ public static class ChatProtocolLimits
         ELoginResult.LoginResultDuplicateNickname => "이미 사용 중인 닉네임입니다.",
         ELoginResult.LoginResultAlreadyLoggedIn => "이미 로그인된 연결입니다.",
         ELoginResult.LoginResultRoomFull => "기본 방 정원(1,000명)이 가득 찼습니다.",
+        ELoginResult.LoginResultInvalidCredentials => "아이디 또는 비밀번호가 일치하지 않습니다.",
+        ELoginResult.LoginResultDbError => "데이터베이스 처리 중 오류가 발생했습니다.",
+        ELoginResult.LoginResultAlreadyOnline => "이미 다른 곳에서 접속 중인 계정입니다.",
         _ => $"알 수 없는 로그인 응답 ({result})"
+    };
+
+    public static string DescribeRegisterResult(ERegisterResult result) => result switch
+    {
+        ERegisterResult.RegisterResultSuccess => "회원가입이 완료되었습니다.",
+        ERegisterResult.RegisterResultInvalidUsername => "아이디는 4~20자의 영문·숫자·밑줄(_)만 사용할 수 있습니다.",
+        ERegisterResult.RegisterResultInvalidPassword => "비밀번호는 공백 없는 6~64자여야 합니다.",
+        ERegisterResult.RegisterResultInvalidNickname => "닉네임은 2~12자의 완성형 한글·영문·숫자만 사용할 수 있습니다.",
+        ERegisterResult.RegisterResultDuplicateUsername => "이미 사용 중인 아이디입니다.",
+        ERegisterResult.RegisterResultDuplicateNickname => "이미 사용 중인 닉네임입니다.",
+        ERegisterResult.RegisterResultDbError => "서버 DB가 비활성 상태이거나 일시 오류가 발생했습니다.",
+        _ => $"알 수 없는 회원가입 응답 ({result})"
     };
 
     public static string DescribeJoinRoomResult(EJoinRoomResult result) => result switch

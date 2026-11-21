@@ -12,7 +12,10 @@ partial class Form1
     private NumericUpDown _portInput = null!;
     private Label _nicknameLabel = null!;
     private TextBox _nicknameTextBox = null!;
+    private Label _passwordLabel = null!;
+    private TextBox _passwordTextBox = null!;
     private Button _connectButton = null!;
+    private Button _registerButton = null!;
     private Label _statusLabel = null!;
 
     private SplitContainer _mainSplit = null!;
@@ -59,7 +62,10 @@ partial class Form1
         _portInput = new NumericUpDown();
         _nicknameLabel = new Label();
         _nicknameTextBox = new TextBox();
+        _passwordLabel = new Label();
+        _passwordTextBox = new TextBox();
         _connectButton = new Button();
+        _registerButton = new Button();
         _statusLabel = new Label();
 
         _mainSplit = new SplitContainer();
@@ -99,14 +105,14 @@ partial class Form1
 
         // Form1
         AutoScaleMode = AutoScaleMode.Font;
-        ClientSize = new Size(980, 620);
-        MinimumSize = new Size(780, 480);
+        ClientSize = new Size(1060, 640);
+        MinimumSize = new Size(880, 500);
         Font = new Font("Malgun Gothic", 9.5F, FontStyle.Regular);
         Text = "MultiServer 채팅 데모 클라이언트";
 
         // Top connection bar
         _topPanel.Dock = DockStyle.Top;
-        _topPanel.Size = new Size(980, 52);
+        _topPanel.Size = new Size(1060, 52);
         _topPanel.Padding = new Padding(10, 10, 10, 8);
         _topPanel.BackColor = Color.FromArgb(242, 245, 249);
 
@@ -115,36 +121,50 @@ partial class Form1
         _hostLabel.Location = new Point(10, 16);
 
         _hostTextBox.Text = "127.0.0.1";
-        _hostTextBox.Location = new Point(48, 12);
-        _hostTextBox.Size = new Size(120, 26);
+        _hostTextBox.Location = new Point(44, 12);
+        _hostTextBox.Size = new Size(104, 26);
 
         _portLabel.AutoSize = true;
         _portLabel.Text = "포트";
-        _portLabel.Location = new Point(178, 16);
+        _portLabel.Location = new Point(156, 16);
 
         _portInput.Minimum = 1;
         _portInput.Maximum = 65535;
         _portInput.Value = 7777;
-        _portInput.Location = new Point(216, 12);
-        _portInput.Size = new Size(74, 26);
+        _portInput.Location = new Point(190, 12);
+        _portInput.Size = new Size(68, 26);
 
         _nicknameLabel.AutoSize = true;
-        _nicknameLabel.Text = "닉네임";
-        _nicknameLabel.Location = new Point(302, 16);
+        _nicknameLabel.Text = "아이디";
+        _nicknameLabel.Location = new Point(268, 16);
 
-        _nicknameTextBox.PlaceholderText = "2~12자 한글/영문/숫자";
-        _nicknameTextBox.MaxLength = 12;
-        _nicknameTextBox.Location = new Point(352, 12);
-        _nicknameTextBox.Size = new Size(160, 26);
+        _nicknameTextBox.PlaceholderText = "아이디(4~20) 또는 닉네임";
+        _nicknameTextBox.MaxLength = 20;
+        _nicknameTextBox.Location = new Point(316, 12);
+        _nicknameTextBox.Size = new Size(134, 26);
 
-        _connectButton.Text = "접속 / 로그인";
-        _connectButton.Location = new Point(522, 10);
-        _connectButton.Size = new Size(116, 30);
+        _passwordLabel.AutoSize = true;
+        _passwordLabel.Text = "비밀번호";
+        _passwordLabel.Location = new Point(458, 16);
+
+        _passwordTextBox.PlaceholderText = "비밀번호 (DB모드)";
+        _passwordTextBox.MaxLength = 64;
+        _passwordTextBox.UseSystemPasswordChar = true;
+        _passwordTextBox.Location = new Point(518, 12);
+        _passwordTextBox.Size = new Size(124, 26);
+
+        _connectButton.Text = "로그인";
+        _connectButton.Location = new Point(650, 10);
+        _connectButton.Size = new Size(88, 30);
+
+        _registerButton.Text = "회원가입";
+        _registerButton.Location = new Point(744, 10);
+        _registerButton.Size = new Size(80, 30);
 
         _statusLabel.AutoSize = true;
         _statusLabel.Text = "상태: 미연결";
         _statusLabel.ForeColor = Color.FromArgb(71, 85, 105);
-        _statusLabel.Location = new Point(650, 16);
+        _statusLabel.Location = new Point(834, 16);
 
         _topPanel.Controls.Add(_hostLabel);
         _topPanel.Controls.Add(_hostTextBox);
@@ -152,7 +172,10 @@ partial class Form1
         _topPanel.Controls.Add(_portInput);
         _topPanel.Controls.Add(_nicknameLabel);
         _topPanel.Controls.Add(_nicknameTextBox);
+        _topPanel.Controls.Add(_passwordLabel);
+        _topPanel.Controls.Add(_passwordTextBox);
         _topPanel.Controls.Add(_connectButton);
+        _topPanel.Controls.Add(_registerButton);
         _topPanel.Controls.Add(_statusLabel);
 
         // Main SplitContainer

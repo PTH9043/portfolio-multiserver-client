@@ -10,10 +10,10 @@ C++20 `MultiServer`([../MultiServer](../MultiServer))와 **동일한 `.proto` �
 
 | 파일 | 책임 |
 |---|---|
-| `Protocol/ChatProtocolLimits.cs` | C++ 서버(`Packet.h`, `ChatProtocolLimits.h`)와 동일한 프레임 한도(4B 헤더 · 1,020B 최대 본문), 닉네임 규칙(2~12자 완성형 한글·영문·숫자), 채팅 200자 제한, 10초 하트비트 주기, `ELoginResult`·`EJoinRoomResult` 한국어 안내 매핑 |
+| `Protocol/ChatProtocolLimits.cs` | C++ 서버(`Packet.h`, `ChatProtocolLimits.h`)와 동일한 프레임 한도(4B 헤더 · 1,020B 최대 본문), 아이디(4~20자 영문·숫자·`_`)·비밀번호(6~64자)·닉네임(2~12자 완성형 한글·영문·숫자)·채팅 200자 규칙, 10초 하트비트 주기, `ELoginResult`·`ERegisterResult`·`EJoinRoomResult` 한국어 안내 매핑 |
 | `Network/PacketFramer.cs` | `[uint16 type LE][uint16 size LE] + Protobuf Body` 인코더(`PacketFramer`) 및 TCP 분할·병합 스트림 조립 + 1,020B 초과 프레임 거부 디코더(`PacketStreamDecoder`) |
-| `Network/ChatClientConnection.cs` | 비동기 `TcpClient` 접속·송신 직렬화(`SemaphoreSlim`)·수신 루프·패킷 디스패치(`SC_LOGIN_RESULT`/`SC_CHAT`/`SC_ROOM_USER_COUNT`/`SC_ROOM_USERS`/`SC_ROOM_LIST`/`SC_JOIN_ROOM_RESULT`/`SC_PONG`)·정상 종료 및 오류 전파 (UI 비의존) |
-| `Form1.cs` / `Form1.Designer.cs` | 반응형 `TableLayoutPanel` 기반 채팅·다중 방(4채널) 선택/이동·참가자 20명 페이징 UI, 10초 `CS_PING`/`SC_PONG` 하트비트 및 상태바 RTT(ms) 표시, 한글 IME `Enter` 안정화(`BeginInvoke`), GDI `Font` 캐시/해제, 로그인 거절 상태 보존 |
+| `Network/ChatClientConnection.cs` | 비동기 `TcpClient` 접속·송신 직렬화(`SemaphoreSlim`)·수신 루프·패킷 디스패치(`SC_REGISTER_RESULT`/`SC_LOGIN_RESULT`/`SC_CHAT`/`SC_ROOM_USER_COUNT`/`SC_ROOM_USERS`/`SC_ROOM_LIST`/`SC_JOIN_ROOM_RESULT`/`SC_PONG`)·정상 종료 및 오류 전파 (UI 비의존) |
+| `Form1.cs` / `Form1.Designer.cs` | 상단 `아이디`/`비밀번호`/`[접속 / 로그인]`/`[회원가입]` 모달 대화창(`--db=mysql` 계정 인증 및 비밀번호 공란 시 `--db=off` 닉네임 호환), 반응형 `TableLayoutPanel` 기반 채팅·다중 방(4채널) 선택/이동·참가자 20명 페이징 UI, 10초 `CS_PING`/`SC_PONG` 하트비트 및 상태바 RTT(ms) 표시, 한글 IME `Enter` 안정화(`BeginInvoke`), GDI `Font` 캐시/해제 |
 | `Diagnostics/ClientRuntimeTrace.cs` | C++ `MultiServer`와 비트 단위 동일한 `CVTRACE1`(64B 헤더 + 256B 슬롯) 이진 `.cvtrace` 및 JSONL `.cvlog` 기록기 (`AsyncLocal` 스코프 전파, Win32 `GetProcessTimes` `runId` 동기화) |
 | `Program.cs` | 클라이언트 프로세스 시작/종료 수명 주기 및 `ClientRuntimeTrace` 초기화·정상 종료(`orderlyEnd`) 보장 |
 
@@ -38,15 +38,20 @@ dotnet build ChatClient.csproj -c Release
 ```
 
 ### 실행
-1. C++ 서버 실행:
+1. Docker MySQL 8.4 실행 (계정 영속 모드 사용 시):
+   ```bat
+   docker compose -f ..\MultiServer\db\docker-compose.yml up -d
+   ```
+2. C++ 서버 실행:
    ```bat
    ..\MultiServer\Server\Bin\Release\ServerApp.exe 4 7777
    ```
-2. 클라이언트 실행 (2개 이상 동시 실행 가능):
+   > MySQL 없이 빠르게 테스트하려면 `--db=off` 옵션을 추가합니다.
+3. 클라이언트 실행 (2개 이상 동시 실행 가능):
    ```bat
    bin\Release\net10.0-windows\ChatClient.exe
    ```
-3. 상단 닉네임 입력(한글·영문·숫자 2~12자) → `[접속 / 로그인]` 클릭 → 채팅 송수신, 우측 상단 채널 콤보박스(`#1 로비` / `#2 자유` / `#3 전략` / `#4 거래`) `[방 이동]`, 20명 단위 참가자 페이징(`◀ 이전` / `다음 ▶`), 상단 상태바 실시간 Ping RTT 확인.
+4. 상단 `[회원가입]`으로 계정(아이디·비밀번호·닉네임)을 만든 뒤 `아이디`/`비밀번호` 입력 → `[접속 / 로그인]` 클릭(비밀번호를 비우면 `--db=off` 닉네임 호환 모드로 접속) → 채팅 송수신, 우측 상단 채널 콤보박스(`#1 로비` / `#2 자유` / `#3 전략` / `#4 거래`) `[방 이동]`, 20명 단위 참가자 페이징(`◀ 이전` / `다음 ▶`), 상단 상태바 실시간 Ping RTT 확인.
 
 ---
 
