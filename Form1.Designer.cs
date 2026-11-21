@@ -289,6 +289,7 @@ partial class Form1
         _usersTopPanel.ResumeLayout(false);
         _usersTopPanel.PerformLayout();
         _pagingPanel.ResumeLayout(false);
+        _pagingPanel.PerformLayout();
         ResumeLayout(false);
     }
 

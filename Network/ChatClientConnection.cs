@@ -1,4 +1,5 @@
 using System.Net.Sockets;
+using ChatClient.Diagnostics;
 using ChatClient.Protocol;
 using Google.Protobuf;
 using Multiplayer.Protocol;
@@ -11,6 +12,9 @@ namespace ChatClient.Network;
 /// </summary>
 public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
 {
+    private const string TraceSource = "Network/ChatClientConnection.cs";
+
+    private readonly ulong _traceId = ClientRuntimeTrace.NextObjectId();
     private readonly SemaphoreSlim _sendLock = new(1, 1);
     private readonly PacketStreamDecoder _decoder = new();
     private readonly object _stateLock = new();
@@ -21,6 +25,11 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
     private Task? _receiveTask;
     private int _disconnectSignaled;
     private bool _disposed;
+
+    public ChatClientConnection()
+    {
+        ClientRuntimeTrace.RecordEvent(TraceEventKind.Create, nameof(ChatClientConnection), nameof(ChatClientConnection), _traceId, TraceSource);
+    }
 
     public bool IsConnected
     {
@@ -41,6 +50,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
     public async Task ConnectAndLoginAsync(string host, int port, string nickname, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        using var _ = ClientRuntimeTrace.EnterScope(nameof(ChatClientConnection), nameof(ConnectAndLoginAsync), _traceId, TraceSource);
 
         await DisconnectAsync(notifyDisconnect: false).ConfigureAwait(false);
 
@@ -48,6 +58,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
         try
         {
             await client.ConnectAsync(host, port, cancellationToken).ConfigureAwait(false);
+            ClientRuntimeTrace.Log("INFO", $"Connected to {host}:{port} (nickname={nickname})", _traceId);
             NetworkStream stream = client.GetStream();
             var cts = new CancellationTokenSource();
 
@@ -60,13 +71,15 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
                 Interlocked.Exchange(ref _disconnectSignaled, 0);
             }
 
+            ClientRuntimeTrace.RecordEvent(TraceEventKind.Post, nameof(ChatClientConnection), nameof(ReceiveLoopAsync), _traceId, TraceSource);
             _receiveTask = Task.Run(() => ReceiveLoopAsync(stream, cts.Token), CancellationToken.None);
 
             await SendAsync(ECSPacket.CsLogin, new CSLogin { Nickname = nickname }, cancellationToken)
                 .ConfigureAwait(false);
         }
-        catch
+        catch (Exception ex)
         {
+            ClientRuntimeTrace.Log("ERROR", $"ConnectAndLogin failed ({host}:{port}): {ex.Message}", _traceId);
             client.Dispose();
             await DisconnectAsync(notifyDisconnect: false).ConfigureAwait(false);
             throw;
@@ -86,6 +99,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
     public async Task SendAsync(ECSPacket packetType, IMessage message, CancellationToken cancellationToken = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        using var _ = ClientRuntimeTrace.EnterScope(nameof(ChatClientConnection), $"SendAsync({packetType})", _traceId, TraceSource);
 
         byte[] frame = PacketFramer.EncodeFrame(packetType, message);
 
@@ -158,6 +172,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
 
     private async Task ReceiveLoopAsync(NetworkStream stream, CancellationToken ct)
     {
+        using var traceScope = ClientRuntimeTrace.EnterScope(nameof(ChatClientConnection), nameof(ReceiveLoopAsync), _traceId, TraceSource, TraceEventKind.Callback);
         byte[] recvBuffer = new byte[ChatProtocolLimits.PacketBufferSize * 4];
         string disconnectReason = "서버 연결이 종료되었습니다.";
 
@@ -183,6 +198,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
                 // TryPopPacket이 프로토콜 오류를 보고한 경우 즉시 종료합니다.
                 if (frameError is not null)
                 {
+                    ClientRuntimeTrace.Log("WARNING", frameError, _traceId);
                     ErrorOccurred?.Invoke(frameError);
                     disconnectReason = frameError;
                     break;
@@ -204,6 +220,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
         }
         catch (Exception ex)
         {
+            ClientRuntimeTrace.Log("ERROR", $"ReceiveLoop error: {ex.Message}", _traceId);
             ErrorOccurred?.Invoke($"수신 오류: {ex.Message}");
             disconnectReason = $"연결 끊김: {ex.Message}";
         }
@@ -219,6 +236,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
 
     private void DispatchPacket(ushort rawType, byte[] body)
     {
+        using var _ = ClientRuntimeTrace.EnterScope(nameof(ChatClientConnection), $"DispatchPacket({(ESCPacket)rawType})", _traceId, TraceSource);
         try
         {
             switch ((ESCPacket)rawType)
@@ -240,12 +258,14 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
                     break;
 
                 default:
+                    ClientRuntimeTrace.Log("WARNING", $"Ignored unknown server packet type={rawType} ({body.Length}B)", _traceId);
                     ErrorOccurred?.Invoke($"알 수 없는 서버 패킷 번호({rawType})를 무시했습니다.");
                     break;
             }
         }
         catch (InvalidProtocolBufferException ex)
         {
+            ClientRuntimeTrace.Log("WARNING", $"Packet({rawType}) parse failed: {ex.Message}", _traceId);
             ErrorOccurred?.Invoke($"패킷({rawType}) 파싱 실패: {ex.Message}");
         }
     }
@@ -276,6 +296,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        ClientRuntimeTrace.RecordEvent(TraceEventKind.Destroy, nameof(ChatClientConnection), nameof(DisposeAsync), _traceId, TraceSource);
         await DisconnectAsync(notifyDisconnect: false).ConfigureAwait(false);
         _sendLock.Dispose();
     }
@@ -285,6 +306,7 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
         if (_disposed)
             return;
         _disposed = true;
+        ClientRuntimeTrace.RecordEvent(TraceEventKind.Destroy, nameof(ChatClientConnection), nameof(Dispose), _traceId, TraceSource);
         CloseTransportOnly();
         lock (_stateLock)
         {

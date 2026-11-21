@@ -1,3 +1,5 @@
+using ChatClient.Diagnostics;
+
 namespace ChatClient;
 
 static class Program
@@ -8,9 +10,17 @@ static class Program
     [STAThread]
     static void Main()
     {
-        // To customize application configuration such as set high DPI settings or default font,
-        // see https://aka.ms/applicationconfiguration.
-        ApplicationConfiguration.Initialize();
-        Application.Run(new Form1());
-    }    
+        ClientRuntimeTrace.Start();
+        ClientRuntimeTrace.Log("INFO", "ChatClient started");
+        try
+        {
+            ApplicationConfiguration.Initialize();
+            Application.Run(new Form1());
+        }
+        finally
+        {
+            ClientRuntimeTrace.Log("INFO", "ChatClient exiting");
+            ClientRuntimeTrace.Stop("Program.cs");
+        }
+    }
 }

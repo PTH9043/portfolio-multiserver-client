@@ -1,3 +1,4 @@
+using ChatClient.Diagnostics;
 using ChatClient.Network;
 using ChatClient.Protocol;
 using Multiplayer.Protocol;
@@ -6,6 +7,9 @@ namespace ChatClient;
 
 public partial class Form1 : Form
 {
+    private const string TraceSource = "Form1.cs";
+
+    private readonly ulong _traceId = ClientRuntimeTrace.NextObjectId();
     private readonly ChatClientConnection _connection = new();
     private readonly Font _chatRegularFont;
     private readonly Font _chatBoldFont;
@@ -18,6 +22,7 @@ public partial class Form1 : Form
 
     public Form1()
     {
+        ClientRuntimeTrace.RecordEvent(TraceEventKind.Create, nameof(Form1), nameof(Form1), _traceId, TraceSource);
         InitializeComponent();
         _chatRegularFont = new Font(_chatLogBox.Font, FontStyle.Regular);
         _chatBoldFont = new Font(_chatLogBox.Font, FontStyle.Bold);
@@ -46,26 +51,32 @@ public partial class Form1 : Form
         };
 
         _chatInputBox.TextChanged += (_, _) => UpdateChatLengthCounter();
-        _chatInputBox.KeyDown += async (_, e) =>
+        _chatInputBox.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter && !e.Shift)
             {
                 e.SuppressKeyPress = true;
-                await SendCurrentChatAsync();
+                BeginInvoke(async () => await SendCurrentChatAsync());
             }
         };
-        _nicknameTextBox.KeyDown += async (_, e) =>
+        _nicknameTextBox.KeyDown += (_, e) =>
         {
             if (e.KeyCode == Keys.Enter && !_connection.IsConnected && !_busyConnecting)
             {
                 e.SuppressKeyPress = true;
-                await OnConnectButtonClickAsync();
+                BeginInvoke(async () => await OnConnectButtonClickAsync());
             }
         };
 
+        Shown += (_, _) =>
+        {
+            _nicknameTextBox.Focus();
+            AppendSystemLine("상단 닉네임 칸(2~12자 한글·영문·숫자)을 입력하고 [접속 / 로그인]을 누르면 아래 채팅 입력창이 활성화됩니다.", Color.SlateGray);
+        };
         FormClosing += (_, _) => _connection.Dispose();
         FormClosed += (_, _) =>
         {
+            ClientRuntimeTrace.RecordEvent(TraceEventKind.Destroy, nameof(Form1), "FormClosed", _traceId, TraceSource);
             _chatRegularFont.Dispose();
             _chatBoldFont.Dispose();
         };
@@ -129,6 +140,7 @@ public partial class Form1 : Form
 
     private async void OnLoginResult(SCLoginResult packet)
     {
+        using var _ = ClientRuntimeTrace.EnterScope(nameof(Form1), nameof(OnLoginResult), _traceId, TraceSource, TraceEventKind.Callback);
         try
         {
             if (packet.Result == ELoginResult.LoginResultSuccess)
@@ -141,6 +153,7 @@ public partial class Form1 : Form
                 _statusLabel.ForeColor = Color.FromArgb(15, 118, 110);
                 UpdateUserCountDisplay(packet.UserCount);
                 AppendSystemLine($"로그인 성공! 기본 방(#1)에 입장했습니다. (현재 {packet.UserCount:N0}명)", Color.Teal);
+                ClientRuntimeTrace.Log("INFO", $"Login success: nickname={_myNickname}, userCount={packet.UserCount}", _traceId);
                 UpdateUiState();
                 _chatInputBox.Focus();
                 await RequestUsersPageAsync(0);
@@ -148,6 +161,7 @@ public partial class Form1 : Form
             }
 
             string reason = ChatProtocolLimits.DescribeLoginResult(packet.Result);
+            ClientRuntimeTrace.Log("WARNING", $"Login rejected: {packet.Result} ({reason})", _traceId);
             AppendSystemLine($"로그인 거절: {reason}", Color.Firebrick);
             _statusLabel.Text = "상태: 로그인 거절";
             _statusLabel.ForeColor = Color.Firebrick;
@@ -158,12 +172,14 @@ public partial class Form1 : Form
         }
         catch (Exception ex)
         {
+            ClientRuntimeTrace.Log("ERROR", $"OnLoginResult error: {ex.Message}", _traceId);
             AppendSystemLine($"로그인 후처리 오류: {ex.Message}", Color.Firebrick);
         }
     }
 
     private void OnChatReceived(SCChat packet)
     {
+        using var _ = ClientRuntimeTrace.EnterScope(nameof(Form1), nameof(OnChatReceived), _traceId, TraceSource, TraceEventKind.Callback);
         bool isMine = string.Equals(packet.Nickname, _myNickname, StringComparison.Ordinal);
         string timestamp = DateTime.Now.ToString("HH:mm:ss");
 
@@ -239,6 +255,7 @@ public partial class Form1 : Form
 
     private async Task SendCurrentChatAsync()
     {
+        using var _ = ClientRuntimeTrace.EnterScope(nameof(Form1), nameof(SendCurrentChatAsync), _traceId, TraceSource);
         if (!_loggedIn || !_connection.IsConnected)
             return;
 
@@ -323,6 +340,9 @@ public partial class Form1 : Form
         _connectButton.Text = connected ? "연결 해제" : "접속 / 로그인";
 
         _chatInputBox.Enabled = _loggedIn;
+        _chatInputBox.PlaceholderText = _loggedIn
+            ? "메시지를 입력하세요 (최대 200자, Enter로 전송)"
+            : "로그인 후 입력 가능 — 먼저 상단 닉네임 입력 후 [접속 / 로그인] 클릭";
         _sendButton.Enabled = _loggedIn;
         _refreshUsersButton.Enabled = _loggedIn;
         UpdatePagingButtons();
