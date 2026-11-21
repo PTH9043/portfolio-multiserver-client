@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <ProtocolCSharpDir Condition="'$(ProtocolCSharpDir)' == ''">..\MultiServer\Protocol\Generated\CSharp</ProtocolCSharpDir>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Google.Protobuf" Version="3.33.6" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="$(ProtocolCSharpDir)\*.cs" Link="Protocol\Generated\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>
