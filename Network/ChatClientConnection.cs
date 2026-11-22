@@ -41,7 +41,6 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
     }
 
     public event Action<SCLoginResult>? LoginResultReceived;
-    public event Action<SCRegisterResult>? RegisterResultReceived;
     public event Action<SCChat>? ChatReceived;
     public event Action<SCRoomUserCount>? RoomUserCountReceived;
     public event Action<SCRoomUsers>? RoomUsersReceived;
@@ -310,10 +309,6 @@ public sealed class ChatClientConnection : IAsyncDisposable, IDisposable
             {
                 case ESCPacket.ScLoginResult:
                     LoginResultReceived?.Invoke(SCLoginResult.Parser.ParseFrom(body));
-                    break;
-
-                case ESCPacket.ScRegisterResult:
-                    RegisterResultReceived?.Invoke(SCRegisterResult.Parser.ParseFrom(body));
                     break;
 
                 case ESCPacket.ScChat:
